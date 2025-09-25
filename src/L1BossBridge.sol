@@ -27,6 +27,7 @@ import { L1Vault } from "./L1Vault.sol";
 contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
+    // @audit - [G-1] - `L1BossBridge::DEPOSIT_LIMIT` can be declared as constant or immutable
     uint256 public DEPOSIT_LIMIT = 100_000 ether;
 
     IERC20 public immutable token;
@@ -36,6 +37,7 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
     error L1BossBridge__DepositLimitReached();
     error L1BossBridge__Unauthorized();
     error L1BossBridge__CallFailed();
+    // @audit - [L-1] - Events missing indexed parameters
 
     event Deposit(address from, address to, uint256 amount);
 
@@ -71,9 +73,12 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
         if (token.balanceOf(address(vault)) + amount > DEPOSIT_LIMIT) {
             revert L1BossBridge__DepositLimitReached();
         }
+        // @audit - [H-1] - `L1BossBridge::depositTokensToL2` can be used to drain funds on any user that approved the
+        // protocol.
         token.safeTransferFrom(from, address(vault), amount);
 
         // Our off-chain service picks up this event and mints the corresponding tokens on L2
+        // @audit - [I-1] - `L1BossBridge::depositTokensToL2` doesn't follow CEI pattern
         emit Deposit(from, l2Recipient, amount);
     }
 
@@ -88,6 +93,7 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
      * @param r The r value of the signature
      * @param s The s value of the signature
      */
+    // @audit - high - signature replay attack exploit
     function withdrawTokensToL1(address to, uint256 amount, uint8 v, bytes32 r, bytes32 s) external {
         sendToL1(
             v,
@@ -118,6 +124,8 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
 
         (address target, uint256 value, bytes memory data) = abi.decode(message, (address, uint256, bytes));
 
+        // @audit - high - sends funds to arbitrary user, everyone can use any 'from' address that has approved the
+        // contract
         (bool success,) = target.call{ value: value }(data);
         if (!success) {
             revert L1BossBridge__CallFailed();

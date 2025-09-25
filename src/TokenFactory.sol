@@ -3,11 +3,11 @@ pragma solidity 0.8.20;
 
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
-/* 
-* @title TokenFactory
-* @dev Allows the owner to deploy new ERC20 contracts
-* @dev This contract will be deployed on both an L1 & an L2
-*/
+/*
+ * @title TokenFactory
+ * @dev Allows the owner to deploy new ERC20 contracts
+ * @dev This contract will be deployed on both an L1 & an L2
+ */
 contract TokenFactory is Ownable {
     mapping(string tokenSymbol => address tokenAddress) private s_tokenToAddress;
 
@@ -22,6 +22,8 @@ contract TokenFactory is Ownable {
      */
     function deployToken(string memory symbol, bytes memory contractBytecode) public onlyOwner returns (address addr) {
         assembly {
+            // @audit - high - EVM opcode incompatible on zksync
+            // @audit - https://docs.zksync.io/zksync-protocol/differences/evm-instructions#create-create2
             addr := create(0, add(contractBytecode, 0x20), mload(contractBytecode))
         }
         s_tokenToAddress[symbol] = addr;
